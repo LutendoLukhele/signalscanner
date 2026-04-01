@@ -1,23 +1,40 @@
 import { RawLead } from '../types';
 
+// Focused on communities where real end-users (not vendors) discuss their tools.
+// Removed r/saas and r/consulting — both are heavily polluted with vendor/marketer content.
 const SUBREDDITS = [
-  'consulting',
   'projectmanagement',
-  'saas',
   'Entrepreneur',
   'smallbusiness',
-  'productivity',
+  'startups',
 ];
 
+// Intent- and frustration-based queries instead of brand-keyword searches.
+// These match organic first-person complaints and switching signals.
 const DEFAULT_QUERIES = [
-  'Monday.com integration broken',
-  'switching from Monday.com',
-  'Asana too expensive',
-  'ClickUp automation not working',
-  'ClickUp frustrating',
-  'Asana alternatives',
-  'project management tool broken',
+  'switching from monday',
+  'leaving asana',
+  'frustrated with clickup',
+  'project management tool problems',
+  'monday.com too expensive',
+  'project management nightmare',
+  'replacing our project management',
+  'hate our project management software',
 ];
+
+// Patterns that reliably indicate AI-generated, promotional, or low-signal content.
+const NOISE_PATTERNS = [
+  /\bin this (post|thread|article|guide)\b/i,
+  /\bcomprehensive (guide|overview|review|breakdown)\b/i,
+  /\blet me (walk|take) you\b/i,
+  /\b(firstly|secondly|thirdly)[,\s]/i,
+  /\bin conclusion\b|\bto summarize\b/i,
+  /\baffiliate\b|\bsponsored post\b|\bdisclosure\b/i,
+];
+
+function isNoise(text: string): boolean {
+  return NOISE_PATTERNS.some(p => p.test(text));
+}
 
 interface RedditChild {
   data: {
@@ -40,7 +57,8 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function fetchSubreddit(sub: string, query: string, delayMs: number): Promise<RawLead[]> {
-  const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=new&limit=25`;
+  // sort=top&t=month: high-engagement posts only — filters out zero-traction spam sorted by new
+  const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=top&t=month&limit=25`;
 
   const res = await fetch(url, {
     headers: { 'User-Agent': 'signal-scanner/1.0 (research tool)' },
@@ -57,20 +75,31 @@ async function fetchSubreddit(sub: string, query: string, delayMs: number): Prom
 
   for (const child of json.data.children) {
     const d = child.data;
-    const text = (d.selftext ?? '').trim() || d.title;
-    if (text.length < 20) continue;
+
+    // Require a real post body, not just a title-only match
+    const body = (d.selftext ?? '').trim();
+    if (body.length < 100) continue;
+
+    // Require at least minimal community engagement
+    if (d.ups < 3) continue;
+
+    // Skip AI-generated / promotional content
+    if (isNoise(body)) continue;
 
     leads.push({
       url:       `https://www.reddit.com${d.permalink}`,
       source:    'reddit',
       author:    d.author,
-      text,
+      text:      body,
       title:     d.title,
       upvotes:   d.ups,
       createdAt: new Date(d.created_utc * 1000),
       query,
     });
   }
+
+  // Return highest-engagement posts first
+  leads.sort((a, b) => (b.upvotes ?? 0) - (a.upvotes ?? 0));
 
   await sleep(delayMs);
   return leads;

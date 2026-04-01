@@ -72,7 +72,7 @@ app.get('/api/scan/events', (req: Request, res: Response) => {
 
   req.on('close', () => {
     scanBus.off('scan', send);
-    res.end();
+    try { res.end(); } catch { /* socket already gone */ }
   });
 });
 

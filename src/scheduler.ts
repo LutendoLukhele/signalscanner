@@ -20,9 +20,41 @@ async function runScraper(name: string, fn: () => Promise<RawLead[]>): Promise<R
   }
 }
 
+/**
+ * Apply a quality gate:
+ * 1. Discard leads below minScore.
+ * 2. Per source, keep at most maxPerSource highest-scoring leads.
+ */
+function applyQualityGate(
+  leads: ScoredLead[],
+  minScore: number,
+  maxPerSource: number,
+): ScoredLead[] {
+  const qualified = leads.filter(l => l.score >= minScore);
+
+  const bySource = new Map<string, ScoredLead[]>();
+  for (const lead of qualified) {
+    const bucket = bySource.get(lead.source) ?? [];
+    bucket.push(lead);
+    bySource.set(lead.source, bucket);
+  }
+
+  const result: ScoredLead[] = [];
+  for (const bucket of bySource.values()) {
+    bucket.sort((a, b) => b.score - a.score);
+    result.push(...bucket.slice(0, maxPerSource));
+  }
+  return result;
+}
+
 export async function runScan(): Promise<ScoredLead[]> {
   console.log('[scanner] Starting scan…');
   const scanId = startScan();
+
+  // Quality gate thresholds — configurable via .env
+  // Use || fallback so non-numeric / missing env values don't produce NaN
+  const minScore     = Number(process.env.MIN_LEAD_SCORE)      || 5;
+  const maxPerSource = Number(process.env.MAX_LEADS_PER_SOURCE) || 15;
 
   try {
     const raw = (await Promise.allSettled([
@@ -39,17 +71,20 @@ export async function runScan(): Promise<ScoredLead[]> {
 
     console.log(`[scanner] Raw leads collected: ${raw.length}`);
 
-    const scored = await scoreLeads(raw);
+    const scored  = await scoreLeads(raw);
+    const quality = applyQualityGate(scored, minScore, maxPerSource);
 
-    for (const lead of scored) {
+    console.log(`[scanner] Quality gate (score≥${minScore}, max ${maxPerSource}/source): ${scored.length} → ${quality.length} leads`);
+
+    for (const lead of quality) {
       upsertLead(lead);
     }
 
-    finishScan(scanId, scored.length);
-    console.log(`[scanner] Scan complete. Persisted ${scored.length} leads.`);
-    scanBus.emit('scan', { type: 'done', total: scored.length });
+    finishScan(scanId, quality.length);
+    console.log(`[scanner] Scan complete. Persisted ${quality.length} leads.`);
+    scanBus.emit('scan', { type: 'done', total: quality.length });
 
-    return scored;
+    return quality;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     scanBus.emit('scan', { type: 'error', message });
