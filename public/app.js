@@ -158,26 +158,53 @@ document.getElementById('modalSave').addEventListener('click', async () => {
 // ── Scan button ───────────────────────────────────────────────────────────────
 
 document.getElementById('scanBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('scanBtn');
-  btn.disabled   = true;
+  const btn        = document.getElementById('scanBtn');
+  const status     = document.getElementById('scanStatus');
+  const statusText = document.getElementById('scanStatusText');
+
+  btn.disabled = true;
   btn.textContent = 'Scanning…';
-  try {
-    await fetchJSON('/api/scan', { method: 'POST' });
-    // Poll stats every 5s for 2 min
-    let polls = 0;
-    const iv = setInterval(async () => {
-      polls++;
+  status.classList.add('visible');
+  statusText.textContent = 'Starting…';
+
+  // Open SSE stream BEFORE triggering the scan so no events are missed
+  const es = new EventSource('/api/scan/events');
+
+  const finish = () => {
+    es.close();
+    btn.disabled = false;
+    btn.textContent = 'Run Scan';
+    status.classList.remove('visible');
+  };
+
+  es.onmessage = async (e) => {
+    let event;
+    try { event = JSON.parse(e.data); } catch { return; }
+
+    if (event.type === 'progress') {
+      statusText.textContent = `${event.scraper} (${event.count} leads)`;
       await loadStats();
       await loadLeads(1);
-      if (polls >= 24) {
-        clearInterval(iv);
-        btn.disabled    = false;
-        btn.textContent = 'Run Scan';
-      }
-    }, 5000);
+    } else if (event.type === 'done') {
+      statusText.textContent = `Done — ${event.total} leads`;
+      await loadStats();
+      await loadLeads(1);
+      finish();
+    } else if (event.type === 'error') {
+      statusText.textContent = `Scan error — ${event.message || 'unknown error'}`;
+      setTimeout(finish, 3000);
+    }
+  };
+
+  es.onerror = () => {
+    statusText.textContent = 'Connection lost — please refresh';
+    setTimeout(finish, 3000);
+  };
+
+  try {
+    await fetchJSON('/api/scan', { method: 'POST' });
   } catch {
-    btn.disabled    = false;
-    btn.textContent = 'Run Scan';
+    finish();
   }
 });
 

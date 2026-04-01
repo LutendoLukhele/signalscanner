@@ -15,6 +15,7 @@ const PAIN_KEYWORDS: Record<PainCategory, string[]> = {
   switching_intent: [
     'switching from', 'switch to', 'migrating to', 'moving to', 'looking for alternative',
     'alternative to', 'better than', 'replacing', 'cancel subscription', 'cancelling',
+    'leaving', 'left monday', 'left asana', 'left clickup', 'replaced',
   ],
   pricing: [
     'too expensive', 'price increase', 'raised prices', 'pricing changed', 'overpriced',
@@ -41,6 +42,24 @@ const URGENCY_LOW_PATTERNS = [
   'wondering if', 'might', 'someday',
 ];
 
+// Patterns that indicate AI-generated, promotional, or low-signal filler content.
+const SPAM_PATTERNS = [
+  /\bin this (post|thread|article|guide)\b/i,
+  /\bcomprehensive (guide|overview|review|breakdown)\b/i,
+  /\blet me (walk|take) you\b/i,
+  /\b(firstly|secondly|thirdly)[,\s]/i,
+  /\bin conclusion\b|\bto summarize\b/i,
+  /\baffiliate\b|\bsponsored\b/i,
+];
+
+// Patterns that indicate authentic, first-person personal experience.
+const AUTHENTIC_PATTERNS = [
+  /\bi (am|was|have been|tried|used|switched|left|hate|love|can't|couldn't|recently)\b/i,
+  /\bwe (are|were|have been|switched|use|tried|moved|left|recently)\b/i,
+  /\bmy (team|company|workflow|experience|issue|problem|boss)\b/i,
+  /\bour (team|company|workflow|experience|stack)\b/i,
+];
+
 // ── Rule-based scorer ──────────────────────────────────────────────────────────
 
 function detectPainCategory(text: string): PainCategory {
@@ -63,7 +82,7 @@ function detectUrgency(text: string, score: number): Urgency {
 
 function ruleScore(lead: RawLead): number {
   const lower = (lead.text + ' ' + (lead.title ?? '')).toLowerCase();
-  let score = 3; // baseline
+  let score = 4; // raised baseline — zero-signal posts shouldn't reach 3
 
   // Pain signal presence
   let matchedKeywords = 0;
@@ -82,6 +101,12 @@ function ruleScore(lead: RawLead): number {
   // Recency boost — within last 48 h
   const ageHours = (Date.now() - lead.createdAt.getTime()) / 36e5;
   if (ageHours < 48) score += 1;
+
+  // Authentic first-person experience boost
+  if (AUTHENTIC_PATTERNS.some(p => p.test(lower))) score += 1;
+
+  // Spam / AI-generated content penalty
+  if (SPAM_PATTERNS.some(p => p.test(lower))) score -= 2;
 
   return Math.max(1, Math.min(10, score));
 }

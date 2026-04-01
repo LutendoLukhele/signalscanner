@@ -44,6 +44,25 @@
 
     header h1 span { color: var(--accent); }
 
+    .scan-status {
+      display: none;
+      align-items: center;
+      gap: .5rem;
+      font-size: .8rem;
+      color: var(--muted);
+      margin-left: .75rem;
+    }
+    .scan-status.visible { display: flex; }
+    .scan-status .spinner {
+      width: 12px; height: 12px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .scan-btn {
       background: var(--accent);
       color: #fff;
@@ -239,7 +258,13 @@
 <body>
   <header>
     <h1>⚡ Signal <span>Scanner</span></h1>
-    <button class="scan-btn" id="scanBtn">Run Scan</button>
+    <div style="display:flex;align-items:center">
+      <div class="scan-status" id="scanStatus">
+        <span class="spinner"></span>
+        <span id="scanStatusText">Scanning…</span>
+      </div>
+      <button class="scan-btn" id="scanBtn">Run Scan</button>
+    </div>
   </header>
 
   <div class="layout">

@@ -5,6 +5,7 @@ import cron from 'node-cron';
 import { z } from 'zod';
 import { getLeads, getLead, saveReply, getStats } from './db';
 import { runScan } from './scheduler';
+import { scanBus, ScanEvent } from './scanEvents';
 
 const app  = express();
 const PORT = Number(process.env.PORT ?? 3000);
@@ -54,6 +55,25 @@ app.post('/api/scan', (_req: Request, res: Response) => {
   // Return immediately; scan runs in background
   res.json({ message: 'Scan started' });
   runScan().catch(err => console.error('[server] Background scan error:', err));
+});
+
+/** GET /api/scan/events — SSE stream of live scan progress */
+app.get('/api/scan/events', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event: ScanEvent) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  scanBus.on('scan', send);
+
+  req.on('close', () => {
+    scanBus.off('scan', send);
+    try { res.end(); } catch { /* socket already gone */ }
+  });
 });
 
 const ReplySchema = z.object({ reply: z.string().min(1) });
