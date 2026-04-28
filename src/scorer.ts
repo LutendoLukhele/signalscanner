@@ -63,13 +63,17 @@ function detectUrgency(text: string, score: number): Urgency {
 
 function ruleScore(lead: RawLead): number {
   const lower = (lead.text + ' ' + (lead.title ?? '')).toLowerCase();
-  let score = 3; // baseline
+  let score = 1; // baseline — elevated only when pain signals are present
 
   // Pain signal presence
   let matchedKeywords = 0;
   for (const keywords of Object.values(PAIN_KEYWORDS)) {
     if (keywords.some(k => lower.includes(k))) matchedKeywords++;
   }
+
+  // No pain keywords at all → noise; keep score at 1
+  if (matchedKeywords === 0) return 1;
+
   score += Math.min(matchedKeywords * 2, 4);
 
   // Upvotes boost (reddit / twitter)
@@ -152,7 +156,7 @@ export async function scoreLeads(raw: RawLead[]): Promise<ScoredLead[]> {
       draftReply = result.draftReply || undefined;
     }
 
-    const urgency = detectUrgency(lead.text, score);
+    const urgency = detectUrgency(lead.text + ' ' + (lead.title ?? ''), score);
     const id      = crypto.createHash('sha256').update(lead.url).digest('hex');
 
     scored.push({

@@ -25,7 +25,18 @@ export async function runScan(): Promise<ScoredLead[]> {
 
   console.log(`[scanner] Raw leads collected: ${raw.length}`);
 
-  const scored = await scoreLeads(raw);
+  // Deduplicate by URL across all sources before scoring
+  const seen = new Set<string>();
+  const deduped = raw.filter(l => {
+    if (seen.has(l.url)) return false;
+    seen.add(l.url);
+    return true;
+  });
+  if (deduped.length < raw.length) {
+    console.log(`[scanner] Deduped to ${deduped.length} unique leads`);
+  }
+
+  const scored = await scoreLeads(deduped);
 
   for (const lead of scored) {
     upsertLead(lead);

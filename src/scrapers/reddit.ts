@@ -1,4 +1,5 @@
 import { RawLead } from '../types';
+import { sanitizeText, isDeletedContent, isValidHttpUrl } from '../utils/dataQuality';
 
 const SUBREDDITS = [
   'consulting',
@@ -57,15 +58,29 @@ async function fetchSubreddit(sub: string, query: string, delayMs: number): Prom
 
   for (const child of json.data.children) {
     const d = child.data;
-    const text = (d.selftext ?? '').trim() || d.title;
+
+    // Skip when the author account is deleted, or when the only available
+    // text is a deletion/removal placeholder.  Line 1 catches author-only
+    // deletion; line 2 catches rawText = '[deleted]' when e.g. selftext is
+    // empty and the title itself was removed.
+    if (isDeletedContent(d.author) || (isDeletedContent(d.selftext ?? '') && isDeletedContent(d.title))) continue;
+
+    const rawText = (d.selftext ?? '').trim() || d.title;
+    if (isDeletedContent(rawText)) continue;
+
+    const text  = sanitizeText(rawText);
+    const title = sanitizeText(d.title);
     if (text.length < 20) continue;
 
+    const leadUrl = `https://www.reddit.com${d.permalink}`;
+    if (!isValidHttpUrl(leadUrl)) continue;
+
     leads.push({
-      url:       `https://www.reddit.com${d.permalink}`,
+      url:       leadUrl,
       source:    'reddit',
-      author:    d.author,
+      author:    sanitizeText(d.author),
       text,
-      title:     d.title,
+      title,
       upvotes:   d.ups,
       createdAt: new Date(d.created_utc * 1000),
       query,

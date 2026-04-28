@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { RawLead } from '../types';
+import { sanitizeText, isValidHttpUrl, parseDate } from '../utils/dataQuality';
 
 const DEFAULT_QUERIES = [
   'monday.com',
@@ -36,24 +37,30 @@ export async function scrape(queries: string[] = DEFAULT_QUERIES): Promise<RawLe
         // Capterra review cards
         $('[data-testid="review-card"], .review-card, article').each((_, el) => {
           const reviewEl  = $(el);
-          const title     = reviewEl.find('h3, [data-testid="review-title"]').first().text().trim();
-          const text      = reviewEl.find('p, [data-testid="review-body"]').first().text().trim();
-          const author    = reviewEl.find('[data-testid="reviewer-name"], .reviewer-name').first().text().trim() || 'anonymous';
+          const title     = sanitizeText(reviewEl.find('h3, [data-testid="review-title"]').first().text());
+          const text      = sanitizeText(reviewEl.find('p, [data-testid="review-body"]').first().text());
+          const author    = sanitizeText(reviewEl.find('[data-testid="reviewer-name"], .reviewer-name').first().text()) || 'anonymous';
           const dateStr   = reviewEl.find('time').first().attr('datetime') ?? '';
           const hrefEl    = reviewEl.find('a[href*="/reviews/"]').first();
           const href      = hrefEl.attr('href') ?? '';
-          const reviewUrl = href.startsWith('http') ? href : `https://www.capterra.com${href}`;
 
-          if (!text || text.length < 30 || seen.has(reviewUrl || url)) return;
-          seen.add(reviewUrl || url);
+          // Skip reviews without a stable per-review URL — using the search
+          // page URL as both the lead URL and dedup key causes all subsequent
+          // URL-less reviews on the same page to be silently dropped.
+          if (!href) return;
+          const reviewUrl = href.startsWith('http') ? href : `https://www.capterra.com${href}`;
+          if (!isValidHttpUrl(reviewUrl) || seen.has(reviewUrl)) return;
+
+          if (!text || text.length < 30) return;
+          seen.add(reviewUrl);
 
           leads.push({
-            url:       reviewUrl || url,
+            url:       reviewUrl,
             source:    'capterra',
-            author:    author || 'anonymous',
+            author,
             text,
             title:     title || undefined,
-            createdAt: dateStr ? new Date(dateStr) : new Date(),
+            createdAt: parseDate(dateStr),
             query,
           });
         });
