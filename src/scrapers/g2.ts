@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { RawLead } from '../types';
+import { sanitizeText, isValidHttpUrl, parseDate } from '../utils/dataQuality';
 
 const DEFAULT_QUERIES = [
   'monday.com',
@@ -37,24 +38,29 @@ export async function scrape(queries: string[] = DEFAULT_QUERIES): Promise<RawLe
         // G2 review cards
         $('[itemprop="review"], .paper.paper--white.paper--box').each((_, el) => {
           const reviewEl   = $(el);
-          const title      = reviewEl.find('[itemprop="name"], .review-title').first().text().trim();
-          const text       = reviewEl.find('[itemprop="reviewBody"], .review-text').first().text().trim();
-          const author     = reviewEl.find('[itemprop="author"], .reviewer-name').first().text().trim() || 'anonymous';
+          const title      = sanitizeText(reviewEl.find('[itemprop="name"], .review-title').first().text());
+          const text       = sanitizeText(reviewEl.find('[itemprop="reviewBody"], .review-text').first().text());
+          const author     = sanitizeText(reviewEl.find('[itemprop="author"], .reviewer-name').first().text()) || 'anonymous';
           const dateStr    = reviewEl.find('[itemprop="datePublished"], time').first().attr('datetime') ?? '';
           const hrefEl     = reviewEl.find('a[href*="/reviews/"]').first();
           const href       = hrefEl.attr('href') ?? '';
-          const reviewUrl  = href.startsWith('http') ? href : `https://www.g2.com${href}`;
 
-          if (!text || text.length < 30 || seen.has(reviewUrl)) return;
+          // Skip reviews without a stable per-review URL — using a search page
+          // URL as the lead URL produces misleading and non-unique data.
+          if (!href) return;
+          const reviewUrl  = href.startsWith('http') ? href : `https://www.g2.com${href}`;
+          if (!isValidHttpUrl(reviewUrl) || seen.has(reviewUrl)) return;
+
+          if (!text || text.length < 30) return;
           seen.add(reviewUrl);
 
           leads.push({
-            url:       reviewUrl || url,
+            url:       reviewUrl,
             source:    'g2',
-            author:    author || 'anonymous',
+            author,
             text,
             title:     title || undefined,
-            createdAt: dateStr ? new Date(dateStr) : new Date(),
+            createdAt: parseDate(dateStr),
             query,
           });
         });

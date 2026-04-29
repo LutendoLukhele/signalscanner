@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { RawLead } from '../types';
+import { sanitizeText, isValidHttpUrl, parseDate } from '../utils/dataQuality';
 
 const DEFAULT_QUERIES = [
   'Monday.com broken',
@@ -36,13 +37,17 @@ export async function scrape(queries: string[] = DEFAULT_QUERIES): Promise<RawLe
 
           $('.timeline-item').each((_, el) => {
             const tweetEl  = $(el);
-            const text     = tweetEl.find('.tweet-content').text().trim();
-            const author   = tweetEl.find('.username').first().text().replace('@', '').trim();
+            const text     = sanitizeText(tweetEl.find('.tweet-content').text());
+            const author   = sanitizeText(tweetEl.find('.username').first().text().replace('@', ''));
             const dateStr  = tweetEl.find('.tweet-date a').attr('title') ?? '';
             const href     = tweetEl.find('.tweet-date a').attr('href') ?? '';
-            const tweetUrl = `https://twitter.com${href}`;
 
-            if (!text || text.length < 20 || !href || seen.has(tweetUrl)) return;
+    // Require a real tweet path (/status/<numeric-id>) so the constructed URL is valid
+            if (!href || !/\/status\/\d+/.test(href)) return;
+            const tweetUrl = `https://twitter.com${href}`;
+            if (!isValidHttpUrl(tweetUrl) || seen.has(tweetUrl)) return;
+
+            if (!text || text.length < 20) return;
             seen.add(tweetUrl);
 
             leads.push({
@@ -50,7 +55,7 @@ export async function scrape(queries: string[] = DEFAULT_QUERIES): Promise<RawLe
               source:    'twitter',
               author,
               text,
-              createdAt: dateStr ? new Date(dateStr) : new Date(),
+              createdAt: parseDate(dateStr),
               query,
             });
           });

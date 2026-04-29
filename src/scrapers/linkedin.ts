@@ -6,6 +6,7 @@
 import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import { RawLead } from '../types';
+import { sanitizeText, isValidHttpUrl } from '../utils/dataQuality';
 
 const DEFAULT_QUERIES = [
   'looking for project management alternative',
@@ -55,16 +56,19 @@ export async function scrape(queries: string[] = DEFAULT_QUERIES): Promise<RawLe
 
         $('.feed-shared-update-v2, .occludable-update').each((_, el) => {
           const postEl  = $(el);
-          const text    = postEl.find('.feed-shared-text, .update-components-text').first().text().trim();
-          const author  = postEl.find('.feed-shared-actor__name, .update-components-actor__name').first().text().trim() || 'anonymous';
+          const text    = sanitizeText(postEl.find('.feed-shared-text, .update-components-text').first().text());
+          const author  = sanitizeText(postEl.find('.feed-shared-actor__name, .update-components-actor__name').first().text()) || 'anonymous';
           const href    = postEl.find('a.app-aware-link[href*="/posts/"]').first().attr('href') ?? '';
           const postUrl = href.split('?')[0];
 
-          if (!text || text.length < 30 || seen.has(postUrl || url)) return;
-          seen.add(postUrl || url);
+          // Require a stable per-post URL so the lead is addressable
+          if (!postUrl || !isValidHttpUrl(postUrl) || seen.has(postUrl)) return;
+
+          if (!text || text.length < 30) return;
+          seen.add(postUrl);
 
           leads.push({
-            url:       postUrl || url,
+            url:       postUrl,
             source:    'linkedin',
             author,
             text,
